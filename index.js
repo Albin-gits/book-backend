@@ -4,6 +4,8 @@ require("./connection");
 var User = require("./model/user");
 const Review = require("./model/review");
 const bcrypt = require("bcryptjs");
+
+
 //initialize
 var app = express();
 app.use(express.json());
@@ -107,6 +109,107 @@ app.put("/review/:id", async (req, res) => {
     res.status(500).send({ message: "Error updating review" });
   }
 });
+// get user count
+app.get("/usercount", async (req, res) => {
+  try {
+    const count = await User.countDocuments();
+    res.json({ count });
+  } catch (error) {
+    console.error("Error getting user count:", error);
+    res.status(500).send({ message: "Error fetching user count" });
+  }
+});
+
+// API: Get total reviews count
+app.get("/reviewcount", async (req, res) => {
+  try {
+    const count = await Review.countDocuments();
+    res.json({ count });
+  } catch (error) {
+    console.error("Error getting review count:", error);
+    res.status(500).send({ message: "Error fetching review count" });
+  }
+});
+
+// API: Get total books count
+app.get("/bookcount", async (req, res) => {
+  try {
+    const response = await fetch('https://api.itbook.store/1.0/new');
+    const data = await response.json();
+    if (data && data.books) {
+      const count = data.books.length; // Access the 'books' array and get its length
+      res.json({ count });
+    } else {
+      console.error("Error: 'books' property not found in the API response:", data);
+      res.status(500).send({ message: "Error processing book count from API" });
+    }
+  } catch (error) {
+    console.error("Error getting book count:", error);
+    res.status(500).send({ message: "Error fetching book count" });
+  }
+});
+
+app.get("/reviews-over-time", async (req, res) => {
+  try {
+  const reviewsByDay = await Review.aggregate([
+  {
+  $group: {
+  _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+  count: { $sum: 1 },
+  },
+  },
+  { $sort: { _id: 1 } },
+  { $project: { date: "$_id", count: 1, _id: 0 } },
+  ]);
+  res.json(reviewsByDay);
+  } catch (error) {
+  console.error("Error fetching reviews over time:", error);
+  res.status(500).send({ message: "Error fetching reviews over time data" });
+  }
+ });
+
+ // API: Get most popular books data
+ app.get("/most-popular-books", async (req, res) => {
+  try {
+  const popularBooks = await Review.aggregate([
+  {
+  $group: {
+  _id: "$bookTitle",
+  reviewCount: { $sum: 1 },
+  },
+  },
+  { $sort: { reviewCount: -1 } }, // Sort by review count in descending order
+  { $limit: 10 }, // Limit to the top 10 most popular books (optional)
+  { $project: { title: "$_id", reviewCount: 1, _id: 0 } },
+  ]);
+  res.json(popularBooks);
+  } catch (error) {
+  console.error("Error fetching most popular books:", error);
+  res.status(500).send({ message: "Error fetching most popular books data" });
+  }
+ });
+ // API: Get all users except the first one
+app.get("/users", async (req, res) => {
+  try {
+    const users = await User.find().skip(1); // Skip the first user
+    res.json(users);
+  } catch (error) {
+    console.error("Error fetching users:", error);
+    res.status(500).send({ message: "Error fetching users" });
+  }
+});
+
+// API: Delete a user by ID
+app.delete("/user/:id", async (req, res) => {
+  try {
+    await User.findByIdAndDelete(req.params.id);
+    res.send({ message: "User deleted" });
+  } catch (error) {
+    console.error("Error deleting user:", error);
+    res.status(500).send({ message: "Error deleting user" });
+  }
+});
+
 
 app.get("/", (req, res) => {
   res.send("hello hii");

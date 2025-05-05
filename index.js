@@ -267,6 +267,16 @@ app.post("/addbook", upload.single("image"), async (req, res) => {
     res.status(500).json({ message: error.message || "Failed to add book" });
   }
 });
+// API: Get all books from the database
+app.get("/books", async (req, res) => {
+  try {
+    const books = await Book.find();
+    res.status(200).json(books);
+  } catch (error) {
+    console.error("Error fetching books from database:", error);
+    res.status(500).send({ message: "Error fetching books from database" });
+  }
+});
 
 // Test route
 app.get("/", (req, res) => {

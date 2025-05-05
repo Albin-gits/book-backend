@@ -108,9 +108,22 @@ app.get("/reviews", async (req, res) => {
 app.get("/review/:id", async (req, res) => {
   try {
     const review = await Review.findById(req.params.id);
-    res.send(review);
+    if (!review) {
+      return res.status(404).json({ message: "Review not found" });
+    }
+
+    // Fetch the corresponding book to get the URL
+    const book = await Book.findOne({ isbn13: review.isbn13 }); // Assuming you have isbn13 in review
+    const url = book ? book.url : ""; // Use empty string if book not found.
+
+    // Send the review data along with the URL.  Don't modify the review object. Create a new object to send
+    const reviewWithUrl = {
+      ...review.toObject(), //convert mongoose object to regular object
+      url: url,
+    };
+    res.status(200).json(reviewWithUrl);
   } catch (error) {
-    console.error("Error fetching review", error); // Added console.error
+    console.error("Error fetching review", error);
     res.status(500).send({ message: "Error fetching review" });
   }
 });
@@ -162,24 +175,13 @@ app.get("/reviewcount", async (req, res) => {
 // API: Get the number of books from external API
 app.get("/bookcount", async (req, res) => {
   try {
-    const response = await fetch("https://api.itbook.store/1.0/new");
-    const data = await response.json();
-    if (data && data.books) {
-      const count = data.books.length;
-      res.json({ count });
-    } else {
-      console.error(
-        "Error: 'books' property not found in the API response:",
-        data
-      );
-      res.status(500).send({ message: "Error processing book count from API" });
-    }
+    const count = await Book.countDocuments();
+    res.json({ count });
   } catch (error) {
-    console.error("Error getting book count:", error);
-    res.status(500).send({ message: "Error fetching book count" });
+    console.error("Error getting review count:", error);
+    res.status(500).send({ message: "Error fetching review count" });
   }
 });
-
 // API: Get reviews over time
 app.get("/reviews-over-time", async (req, res) => {
   try {
@@ -267,14 +269,27 @@ app.post("/addbook", upload.single("image"), async (req, res) => {
     res.status(500).json({ message: error.message || "Failed to add book" });
   }
 });
-// API: Get all books from the database
-app.get("/books", async (req, res) => {
+// Backend (e.g., routes in index.js)
+app.get('/books', async (req, res) => {
   try {
-    const books = await Book.find();
-    res.status(200).json(books);
+    const books = await Book.find(); // Assuming `Book` is your Mongoose model
+    res.json(books);
+  } catch (err) {
+    res.status(500).json({ message: "Error fetching books", error: err });
+  }
+});
+// API: Get a book by ISBN13
+app.get("/books/:isbn13", async (req, res) => {
+  try {
+    const book = await Book.findOne({ isbn13: req.params.isbn13 });
+    if (book) {
+      res.status(200).json(book);
+    } else {
+      res.status(404).json({ message: "Book not found" });
+    }
   } catch (error) {
-    console.error("Error fetching books from database:", error);
-    res.status(500).send({ message: "Error fetching books from database" });
+    console.error("Error fetching book by ISBN13:", error);
+    res.status(500).send({ message: "Error fetching book details" });
   }
 });
 

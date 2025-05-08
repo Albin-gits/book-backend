@@ -1,20 +1,18 @@
 const express = require("express");
 const cors = require("cors");
-const path = require("path"); // Import the 'path' module
-const multer = require("multer"); // Import 'multer'
+const path = require("path");
+const multer = require("multer");
 require("./connection");
 const User = require("./model/user");
 const Review = require("./model/review");
 const bcrypt = require("bcryptjs");
 const Book = require("./model/Book");
 
-// Initialize express
 const app = express();
 app.use(cors());
 app.use(express.json());
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
-// Configure multer for file uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, "uploads/");
@@ -31,29 +29,15 @@ const upload = multer({ storage });
 app.post("/add", async (req, res) => {
   try {
     const { email, username, password } = req.body;
-
-    // Check if a user with the provided email or username already exists
     const existingUser = await User.findOne({ $or: [{ email }, { username }] });
-
     if (existingUser) {
-      return res
-        .status(409) // Conflict status code
-        .send({ message: "Email or username already exists." });
+      return res.status(409).send({ message: "Email or username already exists." });
     }
-
-    // If no existing user is found, proceed with hashing and saving
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
-
-    const newUser = new User({
-      email,
-      username,
-      password: hashedPassword,
-    });
-
+    const newUser = new User({ email, username, password: hashedPassword });
     await newUser.save();
-
-    res.status(201).send({ message: "Signup successful!" }); // Use 201 for successful creation
+    res.status(201).send({ message: "Signup successful!" });
   } catch (error) {
     console.error("Error during signup:", error);
     res.status(500).send({ message: "Signup failed. Please try again." });
@@ -64,7 +48,6 @@ app.post("/add", async (req, res) => {
 app.post("/view", async (req, res) => {
   try {
     const { username, password } = req.body;
-
     const user = await User.findOne({ username });
     if (!user) {
       return res.status(401).send({ message: "Invalid credentials." });
@@ -81,15 +64,28 @@ app.post("/view", async (req, res) => {
   }
 });
 
-// API: Add a review
-app.post("/reviews", async (req, res) => {
+// API: Add a review with potential audio upload
+app.post("/reviews", upload.single("audio"), async (req, res) => {
   try {
-    const newReview = new Review(req.body);
+    const { username, isbn13, bookTitle, reviewText, image, price, subtitle } = req.body;
+    const audio = req.file ? req.file.filename : null;
+
+    const newReview = new Review({
+      username,
+      isbn13,
+      bookTitle,
+      reviewText,
+      image,
+      price,
+      subtitle,
+      audio,
+    });
+
     await newReview.save();
     res.status(201).send(newReview);
   } catch (error) {
-    console.error("Error saving review", error); // Added console.error
-    res.status(500).send({ message: "Error saving review" });
+    console.error("Error saving review with audio", error);
+    res.status(500).send({ message: "Error saving review with audio" });
   }
 });
 
@@ -99,7 +95,7 @@ app.get("/reviews", async (req, res) => {
     const reviews = await Review.find();
     res.send(reviews);
   } catch (error) {
-    console.error("Error fetching reviews", error); // Added console.error
+    console.error("Error fetching reviews", error);
     res.status(500).send({ message: "Error fetching reviews" });
   }
 });
@@ -111,16 +107,9 @@ app.get("/review/:id", async (req, res) => {
     if (!review) {
       return res.status(404).json({ message: "Review not found" });
     }
-
-    // Fetch the corresponding book to get the URL
-    const book = await Book.findOne({ isbn13: review.isbn13 }); // Assuming you have isbn13 in review
-    const url = book ? book.url : ""; // Use empty string if book not found.
-
-    // Send the review data along with the URL.  Don't modify the review object. Create a new object to send
-    const reviewWithUrl = {
-      ...review.toObject(), //convert mongoose object to regular object
-      url: url,
-    };
+    const book = await Book.findOne({ isbn13: review.isbn13 });
+    const url = book ? book.url : "";
+    const reviewWithUrl = { ...review.toObject(), url: url };
     res.status(200).json(reviewWithUrl);
   } catch (error) {
     console.error("Error fetching review", error);
@@ -134,18 +123,40 @@ app.delete("/review/:id", async (req, res) => {
     await Review.findByIdAndDelete(req.params.id);
     res.send({ message: "Review deleted" });
   } catch (error) {
-    console.error("Error deleting review", error); // Added console.error
+    console.error("Error deleting review", error);
     res.status(500).send({ message: "Error deleting review" });
   }
 });
 
-// API: Update a review by ID
-app.put("/review/:id", async (req, res) => {
+// API: Update a review by ID with potential audio update
+app.put("/review/:id", upload.single("audio"), async (req, res) => {
   try {
-    await Review.findByIdAndUpdate(req.params.id, req.body, { new: true });
-    res.send({ message: "Review updated" });
+    const { username, isbn13, bookTitle, reviewText, image, price, subtitle } = req.body;
+    const audio = req.file ? req.file.filename : null;
+
+    const updateData = {
+      username,
+      isbn13,
+      bookTitle,
+      reviewText,
+      image,
+      price,
+      subtitle,
+    };
+
+    if (audio) {
+      updateData.audio = audio;
+    }
+
+    const updatedReview = await Review.findByIdAndUpdate(req.params.id, updateData, { new: true });
+
+    if (!updatedReview) {
+      return res.status(404).send({ message: "Review not found" });
+    }
+
+    res.send({ message: "Review updated", updatedReview });
   } catch (error) {
-    console.error("Error updating review", error); // Added console.error
+    console.error("Error updating review with audio", error);
     res.status(500).send({ message: "Error updating review" });
   }
 });
@@ -172,16 +183,17 @@ app.get("/reviewcount", async (req, res) => {
   }
 });
 
-// API: Get the number of books from external API
+// API: Get the number of books
 app.get("/bookcount", async (req, res) => {
   try {
     const count = await Book.countDocuments();
     res.json({ count });
   } catch (error) {
-    console.error("Error getting review count:", error);
-    res.status(500).send({ message: "Error fetching review count" });
+    console.error("Error getting book count:", error);
+    res.status(500).send({ message: "Error fetching book count" });
   }
 });
+
 // API: Get reviews over time
 app.get("/reviews-over-time", async (req, res) => {
   try {
@@ -244,6 +256,8 @@ app.delete("/user/:id", async (req, res) => {
     res.status(500).send({ message: "Error deleting user" });
   }
 });
+
+// API: Add a book
 app.post("/addbook", upload.single("image"), async (req, res) => {
   try {
     console.log("--- Received /addbook Request ---");
@@ -254,12 +268,10 @@ app.post("/addbook", upload.single("image"), async (req, res) => {
     const { title, subtitle, isbn13, price, url } = req.body;
     const image = req.file ? req.file.filename : null;
 
-    // Validate required fields
     if (!title || !price || !url) {
       return res.status(400).json({ message: "Required fields missing" });
     }
 
-    // Create and save the book
     const book = new Book({ title, subtitle, isbn13, price, url, image });
     await book.save();
 
@@ -269,15 +281,17 @@ app.post("/addbook", upload.single("image"), async (req, res) => {
     res.status(500).json({ message: error.message || "Failed to add book" });
   }
 });
-// Backend (e.g., routes in index.js)
+
+// API: Get all books
 app.get('/books', async (req, res) => {
   try {
-    const books = await Book.find(); // Assuming `Book` is your Mongoose model
+    const books = await Book.find();
     res.json(books);
   } catch (err) {
     res.status(500).json({ message: "Error fetching books", error: err });
   }
 });
+
 // API: Get a book by ISBN13
 app.get("/books/:isbn13", async (req, res) => {
   try {
@@ -290,6 +304,36 @@ app.get("/books/:isbn13", async (req, res) => {
   } catch (error) {
     console.error("Error fetching book by ISBN13:", error);
     res.status(500).send({ message: "Error fetching book details" });
+  }
+});
+
+// API: Audio upload for a specific review (KEEP THIS FOR UPDATING AUDIO)
+app.post("/upload-audio/:id", upload.single("audio"), async (req, res) => {
+  try {
+    const reviewId = req.params.id;
+    const audioFile = req.file ? req.file.filename : null;
+
+    if (!audioFile) {
+      return res.status(400).json({ message: "No audio file uploaded" });
+    }
+
+    const updatedReview = await Review.findByIdAndUpdate(
+      reviewId,
+      { audio: audioFile },
+      { new: true }
+    );
+
+    if (!updatedReview) {
+      return res.status(404).json({ message: "Review not found" });
+    }
+
+    res.status(200).json({
+      message: "Audio uploaded successfully",
+      review: updatedReview,
+    });
+  } catch (error) {
+    console.error("Audio upload error:", error);
+    res.status(500).json({ message: "Failed to upload audio" });
   }
 });
 
